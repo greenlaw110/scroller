@@ -1,4 +1,316 @@
 /*
+ * Zynga Scroller for jQuery
+ * 
+ * An easy way to add the great Zynga Scroller to any jQuery project.
+ * 
+ * This port only utilizes the scrolling features, and doesn't 
+ * include zooming or pull to refresh. Although, we do have the
+ * option to set a default offset for our scrollable areas, so
+ * that's kind of a bonus.
+ *
+ * Plus, the minified version is only 15k!
+ * 
+ * Porting to jQuery by Matt Hoiland on August 2nd, 2012 
+ * http://www.matthoiland.com/
+ */
+
+
+
+	$.fn.scroller = function(options){
+		// Default Settings
+		var settings = $.extend( {
+	      'scrollingX' : 'true',
+	      'scrollingY' : 'true',
+	      'offsetTop' : 0,
+	      'offsetLeft' : 0
+	    }, options);
+	    
+	    
+	    // Add empty data-init to element
+	    $(this).attr('data-init','');
+	    
+	    // Attach EasyScroller to the Element
+		new EasyScroller($(this)[0], {
+			scrollingX: settings.scrollingX,
+			scrollingY: settings.scrollingY,
+			offsetTop: settings.offsetTop,
+			offsetLeft: settings.offsetLeft
+		});
+		return this;
+	};
+			
+
+
+/* 
+ * Below are the following files from the original Zynga build:
+ * 1. Animate.js
+ * 2. Scroller.js  -  [ edited on lines 494-510 ]
+ * 3. EasyScroller.js  -  [ edited on lines 1657-1663 and 1728-1735 ]
+ */
+ 
+
+	
+		
+		
+/*
+ * Scroller
+ * http://github.com/zynga/scroller
+ *
+ * Copyright 2011, Zynga Inc.
+ * Licensed under the MIT License.
+ * https://raw.github.com/zynga/scroller/master/MIT-LICENSE.txt
+ *
+ * Based on the work of: Unify Project (unify-project.org)
+ * http://unify-project.org
+ * Copyright 2011, Deutsche Telekom AG
+ * License: MIT + Apache (V2)
+ */
+
+/**
+ * Generic animation class with support for dropped frames both optional easing and duration.
+ *
+ * Optional duration is useful when the lifetime is defined by another condition than time
+ * e.g. speed of an animating object, etc.
+ *
+ * Dropped frame logic allows to keep using the same updater logic independent from the actual
+ * rendering. This eases a lot of cases where it might be pretty complex to break down a state
+ * based on the pure time difference.
+ */
+(function(global) {
+	var time = Date.now || function() {
+		return +new Date();
+	};
+	var desiredFrames = 60;
+	var millisecondsPerSecond = 1000;
+	var running = {};
+	var counter = 1;
+
+	// Create namespaces
+	if (!global.core) {
+		global.core = { effect : {} };
+
+	} else if (!core.effect) {
+		core.effect = {};
+	}
+
+	core.effect.Animate = {
+
+		/**
+		 * A requestAnimationFrame wrapper / polyfill.
+		 *
+		 * @param callback {Function} The callback to be invoked before the next repaint.
+		 * @param root {HTMLElement} The root element for the repaint
+		 */
+		requestAnimationFrame: (function() {
+
+			// Check for request animation Frame support
+			var requestFrame = global.requestAnimationFrame || global.webkitRequestAnimationFrame || global.mozRequestAnimationFrame || global.oRequestAnimationFrame;
+			var isNative = !!requestFrame;
+
+			if (requestFrame && !/requestAnimationFrame\(\)\s*\{\s*\[native code\]\s*\}/i.test(requestFrame.toString())) {
+				isNative = false;
+			}
+
+			if (isNative) {
+				return function(callback, root) {
+					requestFrame(callback, root)
+				};
+			}
+
+			var TARGET_FPS = 60;
+			var requests = {};
+			var requestCount = 0;
+			var rafHandle = 1;
+			var intervalHandle = null;
+			var lastActive = +new Date();
+
+			return function(callback, root) {
+				var callbackHandle = rafHandle++;
+
+				// Store callback
+				requests[callbackHandle] = callback;
+				requestCount++;
+
+				// Create timeout at first request
+				if (intervalHandle === null) {
+
+					intervalHandle = setInterval(function() {
+
+						var time = +new Date();
+						var currentRequests = requests;
+
+						// Reset data structure before executing callbacks
+						requests = {};
+						requestCount = 0;
+
+						for(var key in currentRequests) {
+							if (currentRequests.hasOwnProperty(key)) {
+								currentRequests[key](time);
+								lastActive = time;
+							}
+						}
+
+						// Disable the timeout when nothing happens for a certain
+						// period of time
+						if (time - lastActive > 2500) {
+							clearInterval(intervalHandle);
+							intervalHandle = null;
+						}
+
+					}, 1000 / TARGET_FPS);
+				}
+
+				return callbackHandle;
+			};
+
+		})(),
+
+
+		/**
+		 * Stops the given animation.
+		 *
+		 * @param id {Integer} Unique animation ID
+		 * @return {Boolean} Whether the animation was stopped (aka, was running before)
+		 */
+		stop: function(id) {
+			var cleared = running[id] != null;
+			if (cleared) {
+				running[id] = null;
+			}
+
+			return cleared;
+		},
+
+
+		/**
+		 * Whether the given animation is still running.
+		 *
+		 * @param id {Integer} Unique animation ID
+		 * @return {Boolean} Whether the animation is still running
+		 */
+		isRunning: function(id) {
+			return running[id] != null;
+		},
+
+
+		/**
+		 * Start the animation.
+		 *
+		 * @param stepCallback {Function} Pointer to function which is executed on every step.
+		 *   Signature of the method should be `function(percent, now, virtual) { return continueWithAnimation; }`
+		 * @param verifyCallback {Function} Executed before every animation step.
+		 *   Signature of the method should be `function() { return continueWithAnimation; }`
+		 * @param completedCallback {Function}
+		 *   Signature of the method should be `function(droppedFrames, finishedAnimation) {}`
+		 * @param duration {Integer} Milliseconds to run the animation
+		 * @param easingMethod {Function} Pointer to easing function
+		 *   Signature of the method should be `function(percent) { return modifiedValue; }`
+		 * @param root {Element ? document.body} Render root, when available. Used for internal
+		 *   usage of requestAnimationFrame.
+		 * @return {Integer} Identifier of animation. Can be used to stop it any time.
+		 */
+		start: function(stepCallback, verifyCallback, completedCallback, duration, easingMethod, root) {
+
+			var start = time();
+			var lastFrame = start;
+			var percent = 0;
+			var dropCounter = 0;
+			var id = counter++;
+
+			if (!root) {
+				root = document.body;
+			}
+
+			// Compacting running db automatically every few new animations
+			if (id % 20 === 0) {
+				var newRunning = {};
+				for (var usedId in running) {
+					newRunning[usedId] = true;
+				}
+				running = newRunning;
+			}
+
+			// This is the internal step method which is called every few milliseconds
+			var step = function(virtual) {
+
+				// Normalize virtual value
+				var render = virtual !== true;
+
+				// Get current time
+				var now = time();
+
+				// Verification is executed before next animation step
+				if (!running[id] || (verifyCallback && !verifyCallback(id))) {
+
+					running[id] = null;
+					completedCallback && completedCallback(desiredFrames - (dropCounter / ((now - start) / millisecondsPerSecond)), id, false);
+					return;
+
+				}
+
+				// For the current rendering to apply let's update omitted steps in memory.
+				// This is important to bring internal state variables up-to-date with progress in time.
+				if (render) {
+
+					var droppedFrames = Math.round((now - lastFrame) / (millisecondsPerSecond / desiredFrames)) - 1;
+					for (var j = 0; j < Math.min(droppedFrames, 4); j++) {
+						step(true);
+						dropCounter++;
+					}
+
+				}
+
+				// Compute percent value
+				if (duration) {
+					percent = (now - start) / duration;
+					if (percent > 1) {
+						percent = 1;
+					}
+				}
+
+				// Execute step callback, then...
+				var value = easingMethod ? easingMethod(percent) : percent;
+				if ((stepCallback(value, now, render) === false || percent === 1) && render) {
+					running[id] = null;
+					completedCallback && completedCallback(desiredFrames - (dropCounter / ((now - start) / millisecondsPerSecond)), id, percent === 1 || duration == null);
+				} else if (render) {
+					lastFrame = now;
+					core.effect.Animate.requestAnimationFrame(step, root);
+				}
+			};
+
+			// Mark as running
+			running[id] = true;
+
+			// Init first step
+			core.effect.Animate.requestAnimationFrame(step, root);
+
+			// Return unique animation ID
+			return id;
+		}
+	};
+})(this);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
  * Scroller
  * http://github.com/zynga/scroller
  *
@@ -177,11 +489,25 @@ var Scroller;
 		/** {Number} Zoom level */
 		__zoomLevel: 1,
 
+		
+		
+/* ***************************************************************/	
+// Edited by Matt Hoiland for jQuery
+
+		setLeftTopOffset: function(offsetLeft, offsetTop) {
+			var self = this;
+			self.__scrollLeft = offsetLeft;
+			self.__scrollTop = offsetTop;
+		},
+	
 		/** {Number} Scroll position on x-axis */
-		__scrollLeft: 0,
+		//__scrollLeft: 500,
 
 		/** {Number} Scroll position on y-axis */
-		__scrollTop: 0,
+		//__scrollTop: 0,
+
+
+/* ***************************************************************/
 
 		/** {Integer} Maximum allowed scroll position on x-axis */
 		__maxScrollLeft: 0,
@@ -1276,3 +1602,263 @@ var Scroller;
 	}
 		
 })();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+var EasyScroller = function(content, options) {
+	
+	this.content = content;
+	this.container = content.parentNode;
+	this.options = options || {};
+
+	// create Scroller instance
+	var that = this;
+	this.scroller = new Scroller(function(left, top, zoom) {
+		that.render(left, top, zoom);
+	}, options);
+
+	// bind events
+	this.bindEvents();
+
+	// the content element needs a correct transform origin for zooming
+	this.content.style[EasyScroller.vendorPrefix + 'TransformOrigin'] = "left top";
+
+
+/* ***************************************************************/	
+// Edited by Matt Hoiland for jQuery
+
+	// reflow for the first time
+	this.reflow(options);
+	
+/* ***************************************************************/	
+
+};
+
+EasyScroller.prototype.render = (function() {
+
+	// Determine Vendor Prefix
+	//
+	var docStyle = document.documentElement.style;
+	
+	var engine;
+	if (window.opera && Object.prototype.toString.call(opera) === '[object Opera]') {
+		engine = 'presto';
+	} else if ('MozAppearance' in docStyle) {
+		engine = 'gecko';
+	} else if ('WebkitAppearance' in docStyle) {
+		engine = 'webkit';
+	} else if (typeof navigator.cpuClass === 'string') {
+		engine = 'trident';
+	}
+	
+	var vendorPrefix = EasyScroller.vendorPrefix = {
+		trident: 'ms',
+		gecko: 'Moz',
+		webkit: 'Webkit',
+		presto: 'O'
+	}[engine];
+	
+	
+	// Create a helper div to test the browser capability
+	//
+	var helperElem = document.createElement("div");
+	var undef;
+	
+	
+	// Append the proper vendor prefix to the DOM style declaration
+	//
+	var perspectiveProperty = vendorPrefix + "Perspective";
+	var transformProperty = vendorPrefix + "Transform";
+
+
+	// Test if the browser can use CSS 'translate3d' or 'translate'
+	//
+	if (helperElem.style[perspectiveProperty] !== undef) {
+		return function(left, top, zoom) {
+			this.content.style[transformProperty] = 'translate3d(' + (-left) + 'px,' + (-top) + 'px,0) scale(' + zoom + ')';
+		};	
+	} else if (helperElem.style[transformProperty] !== undef) {
+		return function(left, top, zoom) {
+			this.content.style[transformProperty] = 'translate(' + (-left) + 'px,' + (-top) + 'px) scale(' + zoom + ')';
+		};
+	} else {
+		return function(left, top, zoom) {
+			this.content.style.marginLeft = left ? (-left/zoom) + 'px' : '';
+			this.content.style.marginTop = top ? (-top/zoom) + 'px' : '';
+			this.content.style.zoom = zoom || '';
+		};
+	}
+})();
+
+
+
+
+EasyScroller.prototype.reflow = function(options) { // Argument added by Matt Hoiland [ see line 24 ]
+
+/* ***************************************************************/	
+// Added by Matt Hoiland for jQuery
+// Also see [ Scroller.js lines 189-193 ]
+
+	// set the offset (left, top)
+	this.scroller.setLeftTopOffset(options.offsetLeft,options.offsetTop);
+	
+/* ***************************************************************/	
+
+	// set the right scroller dimensions
+	this.scroller.setDimensions(this.container.clientWidth, this.container.clientHeight, this.content.offsetWidth, this.content.offsetHeight);
+
+	// refresh the position for zooming purposes
+	var rect = this.container.getBoundingClientRect();
+	this.scroller.setPosition(rect.left + this.container.clientLeft, rect.top + this.container.clientTop);
+	
+};
+
+EasyScroller.prototype.bindEvents = function() {
+
+	var that = this;
+
+	// reflow handling
+	window.addEventListener("resize", function() {
+		that.reflow();
+	}, false);
+
+	// touch devices bind touch events
+	if ('ontouchstart' in window) {
+
+		this.container.addEventListener("touchstart", function(e) {
+
+			// Don't react if initial down happens on a form element
+			if (e.touches[0] && e.touches[0].target && e.touches[0].target.tagName.match(/input|textarea|select/i)) {
+				return;
+			}
+
+			that.scroller.doTouchStart(e.touches, e.timeStamp);
+			e.preventDefault();
+
+		}, false);
+
+		document.addEventListener("touchmove", function(e) {
+			that.scroller.doTouchMove(e.touches, e.timeStamp, e.scale);
+		}, false);
+
+		document.addEventListener("touchend", function(e) {
+			that.scroller.doTouchEnd(e.timeStamp);
+		}, false);
+
+		document.addEventListener("touchcancel", function(e) {
+			that.scroller.doTouchEnd(e.timeStamp);
+		}, false);
+
+	// non-touch bind mouse events
+	} else {
+		
+		var mousedown = false;
+
+		this.container.addEventListener("mousedown", function(e) {
+
+			if (e.target.tagName.match(/input|textarea|select/i)) {
+				return;
+			}
+		
+			that.scroller.doTouchStart([{
+				pageX: e.pageX,
+				pageY: e.pageY
+			}], e.timeStamp);
+
+			mousedown = true;
+			e.preventDefault();
+
+		}, false);
+
+		document.addEventListener("mousemove", function(e) {
+
+			if (!mousedown) {
+				return;
+			}
+			
+			that.scroller.doTouchMove([{
+				pageX: e.pageX,
+				pageY: e.pageY
+			}], e.timeStamp);
+
+			mousedown = true;
+
+		}, false);
+
+		document.addEventListener("mouseup", function(e) {
+
+			if (!mousedown) {
+				return;
+			}
+			
+			that.scroller.doTouchEnd(e.timeStamp);
+
+			mousedown = false;
+
+		}, false);
+
+		this.container.addEventListener("mousewheel", function(e) {
+			if(that.options.zooming) {
+				that.scroller.doMouseZoom(e.wheelDelta, e.timeStamp, e.pageX, e.pageY);	
+				e.preventDefault();
+			}
+		}, false);
+
+	}
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
