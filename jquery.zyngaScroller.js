@@ -30,12 +30,7 @@
 	    $(this).attr('data-init','');
 	    
 	    // Attach EasyScroller to the Element
-		new EasyScroller($(this)[0], {
-			scrollingX: settings.scrollingX,
-			scrollingY: settings.scrollingY,
-			offsetTop: settings.offsetTop,
-			offsetLeft: settings.offsetLeft
-		});
+		new EasyScroller($(this)[0], settings);
 		return this;
 	};
 			
