@@ -1646,6 +1646,9 @@ var EasyScroller = function(content, options) {
 	this.scroller = new Scroller(function(left, top, zoom) {
 		that.render(left, top, zoom);
 	}, options);
+	
+	$(content).data('easyScroller', this);
+	$(content).data('scroller', this.scroller);
 
 	// bind events
 	this.bindEvents();
